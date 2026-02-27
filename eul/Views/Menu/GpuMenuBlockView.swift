@@ -25,9 +25,16 @@ struct GpuMenuBlockView: View {
             }
             ForEach(gpuStore.gpus) { gpu in
                 HStack {
-                    Text(gpu.model ?? "N/A")
-                        .secondaryDisplayText()
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(gpu.model ?? "N/A")
+                            .secondaryDisplayText()
+                            .lineLimit(1)
+                        if let cores = gpu.cores {
+                            Text("\(cores) cores")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        }
+                    }
                     Spacer()
                     if let statistic = gpuStore.getStatustic(for: gpu) {
                         if let coreClock = statistic.coreClock {

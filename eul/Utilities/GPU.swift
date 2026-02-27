@@ -12,6 +12,7 @@ struct GPU: Identifiable {
     var deviceId: String
     var model: String?
     var vendor: String?
+    var cores: Int?
 
     var id: String {
         deviceId
@@ -39,39 +40,50 @@ extension GPU {
             return nil
         }
 
-        return plistArray.first?.items.compactMap {
-            guard $0.isGPU, let deviceId = $0.deviceId else {
+        return plistArray.first?.items.compactMap { item -> GPU? in
+            guard item.isGPU, let deviceId = item.resolvedDeviceId else {
                 return nil
             }
-            return GPU(deviceId: deviceId, model: $0.model, vendor: $0.vendor)
+            return GPU(
+                deviceId: deviceId,
+                model: item.model,
+                vendor: item.vendor,
+                cores: Int(item.cores ?? "")
+            )
         }
     }
 
-    // https://stackoverflow.com/questions/10110658/programmatically-get-gpu-percent-usage-in-os-x/22440235#22440235
-    // https://github.com/exelban/stats/blob/master/Modules/GPU/reader.swift
     static func getInfo() -> [Statistic]? {
         guard let propertyList = IOHelper.getPropertyList(for: kIOAcceleratorClassName) else {
             return nil
         }
 
-        return propertyList.compactMap {
-            guard
-                let pciMatch = $0["IOPCIMatch"] as? String ?? $0["IOPCIPrimaryMatch"] as? String,
-                let statistics = $0["PerformanceStatistics"] as? [String: Any],
-                let usagePercentage = statistics["Device Utilization %"] as? Int ?? statistics["GPU Activity(%)"] as? Int
-            else {
-                return nil
+        var results: [Statistic] = []
+        
+        for props in propertyList {
+            guard let statistics = props["PerformanceStatistics"] as? [String: Any] else {
+                continue
             }
-
-            Print("📊 statistics", statistics)
-
-            return Statistic(
+            
+            let usagePercentage = statistics["Device Utilization %"] as? Int 
+                ?? statistics["GPU Activity(%)"] as? Int 
+                ?? 0
+            
+            let pciMatch = props["IOPCIMatch"] as? String 
+                ?? props["IOPCIPrimaryMatch"] as? String 
+                ?? "apple-silicon-gpu"
+            
+            let temp = statistics["Temperature(C)"] as? Double ?? SmcControl.shared.gpuProximityTemperature
+            
+            results.append(Statistic(
                 pciMatch: pciMatch,
                 usagePercentage: usagePercentage,
-                temperature: statistics["Temperature(C)"] as? Double ?? SmcControl.shared.gpuProximityTemperature,
+                temperature: temp,
                 coreClock: statistics["Core Clock(MHz)"] as? Int,
                 memoryClock: statistics["Memory Clock(MHz)"] as? Int
-            )
+            ))
         }
+        
+        return results.isEmpty ? nil : results
     }
 }

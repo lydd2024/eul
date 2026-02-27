@@ -21,6 +21,12 @@ class GpuStore: ObservableObject, Refreshable {
     @Published var usageHistory: [Double] = []
 
     var usageAverage: Double? {
+        #if arch(arm64)
+        if let stat = gpuStatistics.first {
+            return Double(stat.usagePercentage)
+        }
+        #endif
+        
         let stats = gpus.compactMap { getStatustic(for: $0) }
         guard stats.count > 0 else {
             return nil
@@ -36,6 +42,13 @@ class GpuStore: ObservableObject, Refreshable {
     }
 
     var temperatureAverage: Double? {
+        #if arch(arm64)
+        if let temp = gpuStatistics.first?.temperature {
+            return temp
+        }
+        return AppleSiliconSensors.shared?.gpuTemperature
+        #endif
+        
         let temps = gpus.compactMap { getStatustic(for: $0)?.temperature }
         guard temps.count > 0 else {
             return nil
@@ -44,7 +57,13 @@ class GpuStore: ObservableObject, Refreshable {
     }
 
     func getStatustic(for gpu: GPU) -> GPU.Statistic? {
-        gpuStatistics.first {
+        #if arch(arm64)
+        if gpu.deviceId.hasPrefix("apple-silicon-") {
+            return gpuStatistics.first
+        }
+        #endif
+        
+        return gpuStatistics.first {
             $0.pciMatch.lowercased().contains(gpu.deviceId.deletingPrefix("0x"))
         }
     }
@@ -52,7 +71,6 @@ class GpuStore: ObservableObject, Refreshable {
     init() {
         gpus = GPU.getGPUs() ?? []
         initObserver(for: .StoreShouldRefresh)
-        // refresh immediately to prevent "N/A"
         activeCancellable = Publishers
             .CombineLatest(componentsStore.$activeComponents, menuComponentsStore.$activeComponents)
             .sink { _ in
