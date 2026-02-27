@@ -16,20 +16,45 @@ class SmcControl: Refreshable {
     var sensors: [TemperatureData] = []
     var fans: [FanData] = []
     var tempUnit: TemperatureUnit = .celius
+
     var cpuDieTemperature: Double? {
-        sensors.first(where: { $0.sensor.name == "CPU_0_DIE" })?.temp
+        #if arch(arm64)
+        // Apple Silicon: Use IOHID sensors
+        return AppleSiliconSensors.shared?.cpuTemperature
+        #else
+        // Intel: Use SMC
+        return sensors.first(where: { $0.sensor.name == "CPU_0_DIE" })?.temp
+        #endif
     }
 
     var cpuProximityTemperature: Double? {
-        sensors.first(where: { $0.sensor.name == "CPU_0_PROXIMITY" })?.temp
+        #if arch(arm64)
+        // Apple Silicon: Fallback to CPU temperature
+        return AppleSiliconSensors.shared?.cpuTemperature
+        #else
+        // Intel: Use SMC
+        return sensors.first(where: { $0.sensor.name == "CPU_0_PROXIMITY" })?.temp
+        #endif
     }
 
     var gpuProximityTemperature: Double? {
-        sensors.first(where: { $0.sensor.name == "GPU_0_PROXIMITY" })?.temp
+        #if arch(arm64)
+        // Apple Silicon: Use IOHID GPU sensors
+        return AppleSiliconSensors.shared?.gpuTemperature
+        #else
+        // Intel: Use SMC
+        return sensors.first(where: { $0.sensor.name == "GPU_0_PROXIMITY" })?.temp
+        #endif
     }
 
     var memoryProximityTemperature: Double? {
-        sensors.first(where: { $0.sensor.name == "MEM_SLOTS_PROXIMITY" })?.temp
+        #if arch(arm64)
+        // Apple Silicon: Use SOC temperature as approximation
+        return AppleSiliconSensors.shared?.socTemperature
+        #else
+        // Intel: Use SMC
+        return sensors.first(where: { $0.sensor.name == "MEM_SLOTS_PROXIMITY" })?.temp
+        #endif
     }
 
     var isFanValid: Bool {
@@ -41,6 +66,12 @@ class SmcControl: Refreshable {
     }
 
     init() {
+        #if arch(arm64)
+        // Apple Silicon: Use IOHID sensors only, no SMC
+        print("Apple Silicon detected - using IOHID sensors")
+		AppleSiliconSensors.initialize()
+        #else
+        // Intel: Use SMC for everything
         do {
             try SMCKit.open()
             sensors = try SMCKit.allKnownTemperatureSensors().map { .init(sensor: $0) }
@@ -52,6 +83,7 @@ class SmcControl: Refreshable {
         } catch {
             print("SMC init error", error)
         }
+        #endif
     }
 
     deinit {
@@ -63,10 +95,18 @@ class SmcControl: Refreshable {
     }
 
     func close() {
+        #if arch(arm64)
+        // No SMC to close on Apple Silicon
+        #else
         SMCKit.close()
+        #endif
     }
 
     @objc func refresh() {
+        #if arch(arm64)
+        // Apple Silicon: Temperature is fetched on-demand from AppleSiliconSensors
+        #else
+        // Intel: Use SMC
         for sensor in sensors {
             do {
                 sensor.temp = try SMCKit.temperature(sensor.sensor.code, unit: tempUnit)
@@ -83,6 +123,7 @@ class SmcControl: Refreshable {
                 maxSpeed: $0.maxSpeed
             )
         }
+        #endif
         NotificationCenter.default.post(name: .StoreShouldRefresh, object: nil)
     }
 }
