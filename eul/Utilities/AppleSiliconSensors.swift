@@ -43,12 +43,18 @@ class AppleSiliconSensors {
     private let eventGetFloatValue: IOHIDEventGetFloatValueFunc
     private let serviceClientCopyProperty: IOHIDServiceClientCopyPropertyFunc
     
+    // Cached client and services to avoid memory leaks
+    private var systemClient: IOHIDEventSystemClient?
+    private var cachedServices: [IOHIDServiceClient] = []
+    private var dlopenHandle: UnsafeMutableRawPointer?
+    
     private init?() {
         // Load IOKit framework
         guard let handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW) else {
             print("AppleSiliconSensors: Failed to load IOKit framework")
             return nil
         }
+        self.dlopenHandle = handle
         
         // Load required functions
         guard let create = dlsym(handle, "IOHIDEventSystemClientCreate"),
@@ -58,6 +64,7 @@ class AppleSiliconSensors {
               let getFloat = dlsym(handle, "IOHIDEventGetFloatValue"),
               let copyProperty = dlsym(handle, "IOHIDServiceClientCopyProperty") else {
             print("AppleSiliconSensors: Failed to load required functions")
+            dlclose(handle)
             return nil
         }
         
@@ -67,6 +74,38 @@ class AppleSiliconSensors {
         self.serviceClientCopyEvent = unsafeBitCast(copyEvent, to: IOHIDServiceClientCopyEventFunc.self)
         self.eventGetFloatValue = unsafeBitCast(getFloat, to: IOHIDEventGetFloatValueFunc.self)
         self.serviceClientCopyProperty = unsafeBitCast(copyProperty, to: IOHIDServiceClientCopyPropertyFunc.self)
+        
+        // Initialize client and cache services
+        initializeClient()
+    }
+    
+    private func initializeClient() {
+        let dict: NSMutableDictionary = [
+            "PrimaryUsagePage": kHIDPage_AppleVendor,
+            "PrimaryUsage": kHIDUsage_AppleVendor_TemperatureSensor
+        ]
+        
+        guard let client = eventSystemClientCreate(kCFAllocatorDefault) else {
+            print("AppleSiliconSensors: Failed to create event system client")
+            return
+        }
+        self.systemClient = client
+        eventSystemClientSetMatching(client, dict as CFDictionary)
+        
+        guard let services = eventSystemClientCopyServices(client) else {
+            print("AppleSiliconSensors: Failed to copy services")
+            return
+        }
+        
+        // Cache service clients
+        let count = CFArrayGetCount(services)
+        for i in 0..<count {
+            let servicePtr = CFArrayGetValueAtIndex(services, i)
+            let service = unsafeBitCast(servicePtr, to: IOHIDServiceClient.self)
+            cachedServices.append(service)
+        }
+        
+        print("AppleSiliconSensors: Cached \(cachedServices.count) sensor services")
     }
     
     // Initialize shared instance
@@ -83,28 +122,9 @@ class AppleSiliconSensors {
     
     /// Get all temperature sensor readings
     func getAllTemperatures() -> [AppleSiliconSensorReading] {
-        let dict: NSMutableDictionary = [
-            "PrimaryUsagePage": kHIDPage_AppleVendor,
-            "PrimaryUsage": kHIDUsage_AppleVendor_TemperatureSensor
-        ]
-        
-        guard let systemClient = eventSystemClientCreate(kCFAllocatorDefault) else {
-            return []
-        }
-        
-        eventSystemClientSetMatching(systemClient, dict as CFDictionary)
-        
-        guard let services = eventSystemClientCopyServices(systemClient) else {
-            return []
-        }
-        
         var results: [AppleSiliconSensorReading] = []
-        let count = CFArrayGetCount(services)
         
-        for i in 0..<count {
-            let servicePtr = CFArrayGetValueAtIndex(services, i)
-            let service = unsafeBitCast(servicePtr, to: IOHIDServiceClient.self)
-            
+        for service in cachedServices {
             guard let event = serviceClientCopyEvent(service, Int64(kIOHIDEventTypeTemperature), 0, 0),
                   let nameCF = serviceClientCopyProperty(service, "Product" as CFString),
                   let name = nameCF as String? else {
@@ -163,5 +183,12 @@ class AppleSiliconSensors {
         #else
         return false
         #endif
+    }
+    
+    deinit {
+        // Clean up dlopen handle
+        if let handle = dlopenHandle {
+            dlclose(handle)
+        }
     }
 }
