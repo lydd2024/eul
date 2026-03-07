@@ -126,6 +126,13 @@ class NetworkTopStore: ObservableObject {
             )
         }
         .sorted(by: { $0.value.totalSpeedInByte > $1.value.totalSpeedInByte })
+        
+        // MARK: - Cleanup stale PIDs
+        // Get current active PIDs from the results
+        let currentPids = Set(processes.map { $0.pid })
+        // Remove PIDs that are no longer active
+        lastInBytes = lastInBytes.filter { currentPids.contains($0.key) }
+        lastOutBytes = lastOutBytes.filter { currentPids.contains($0.key) }
     }
 
     func update(shouldStart: Bool) {
