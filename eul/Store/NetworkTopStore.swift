@@ -133,12 +133,28 @@ class NetworkTopStore: ObservableObject {
         // Remove PIDs that are no longer active
         lastInBytes = lastInBytes.filter { currentPids.contains($0.key) }
         lastOutBytes = lastOutBytes.filter { currentPids.contains($0.key) }
+        
+        // Clear old data periodically to prevent memory buildup
+        if lastInBytes.count > 1000 {
+            // If dictionary gets too large, clear stale entries
+            lastInBytes.removeAll()
+            lastOutBytes.removeAll()
+            print("⚠️ Cleared stale network PID data to prevent memory leak")
+        }
     }
 
     func update(shouldStart: Bool) {
         guard shouldStart else {
-            timer?.invalidate()
-            timer = nil
+            // Properly invalidate timer
+            if let timer = timer {
+                timer.invalidate()
+                self.timer = nil
+            }
+            
+            // Clear dictionaries to prevent memory buildup
+            lastInBytes.removeAll()
+            lastOutBytes.removeAll()
+            processes = []
             return
         }
 

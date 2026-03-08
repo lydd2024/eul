@@ -80,7 +80,11 @@ func shellPipe(_ args: String..., onData: ((String) -> Void)? = nil, didTerminat
 
     var buffer = Data()
     let outHandle = pipe.fileHandleForReading
-    outHandle.readabilityHandler = { _ in
+    var isTerminated = false
+    
+    outHandle.readabilityHandler = { [weak outHandle] _ in
+        guard let outHandle = outHandle, !isTerminated else { return }
+        
         let data = outHandle.availableData
 
         Print("data received for", args)
@@ -98,8 +102,10 @@ func shellPipe(_ args: String..., onData: ((String) -> Void)? = nil, didTerminat
     }
     outHandle.waitForDataInBackgroundAndNotify()
 
-    task.terminationHandler = { _ in
-        try? outHandle.close()
+    task.terminationHandler = { [weak outHandle] _ in
+        isTerminated = true
+        outHandle?.readabilityHandler = nil  // Clear handler to prevent further callbacks
+        try? outHandle?.close()
         didTerminate?()
     }
 

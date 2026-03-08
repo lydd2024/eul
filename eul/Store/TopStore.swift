@@ -29,10 +29,40 @@ class TopStore: ObservableObject {
     @Published var cpuTopProcesses: [ProcessCpuUsage] = []
     @Published var ramTopProcesses: [RamUsage] = []
 
+    private func terminateProcess(_ process: Process?, completion: @escaping () -> Void) {
+        guard let process = process else {
+            completion()
+            return
+        }
+        
+        process.terminate()
+        
+        // Wait for process to exit in background, then call completion on main queue
+        DispatchQueue.global(qos: .background).async {
+            // Wait up to 1 second for process to terminate
+            let timeout = 1.0
+            let startTime = Date()
+            while process.isRunning {
+                if Date().timeIntervalSince(startTime) > timeout {
+                    print("⚠️ Process did not terminate in time")
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
+    }
+
     func updateRAM(shouldStart: Bool) {
         guard shouldStart else {
-            ramTask?.terminate()
-            ramTask = nil
+            if let task = ramTask {
+                ramTask = nil  // Prevent re-entrant call
+                terminateProcess(task) { [weak self] in
+                    self?.ramTask = nil
+                }
+            }
             return
         }
 
@@ -81,8 +111,12 @@ class TopStore: ObservableObject {
 
     func updateCPU(shouldStart: Bool) {
         guard shouldStart else {
-            cpuTask?.terminate()
-            cpuTask = nil
+            if let task = cpuTask {
+                cpuTask = nil  // Prevent re-entrant call
+                terminateProcess(task) { [weak self] in
+                    self?.cpuTask = nil
+                }
+            }
             return
         }
 
