@@ -1,194 +1,338 @@
-//
-//  AppleSiliconSensors.swift
-//  eul
-//
-//  Created for Apple Silicon temperature monitoring
-//
-
 import Foundation
 import Darwin
 
-// MARK: - IOHID Type Aliases
+// Use CoreFoundation's CFRelease directly (available via Foundation)
+
+// MARK: - HID 类型
+
 typealias IOHIDEventSystemClient = UnsafeMutableRawPointer
 typealias IOHIDServiceClient = UnsafeMutableRawPointer
 typealias IOHIDEvent = UnsafeMutableRawPointer
 
-typealias IOHIDEventSystemClientCreateFunc = @convention(c) (CFAllocator?) -> IOHIDEventSystemClient?
-typealias IOHIDEventSystemClientSetMatchingFunc = @convention(c) (IOHIDEventSystemClient?, CFDictionary?) -> Void
-typealias IOHIDEventSystemClientCopyServicesFunc = @convention(c) (IOHIDEventSystemClient) -> CFArray?
-typealias IOHIDServiceClientCopyEventFunc = @convention(c) (IOHIDServiceClient, Int64, Int32, Int64) -> IOHIDEvent?
-typealias IOHIDEventGetFloatValueFunc = @convention(c) (IOHIDEvent, UInt32) -> Double
-typealias IOHIDServiceClientCopyPropertyFunc = @convention(c) (IOHIDServiceClient, CFString) -> CFString?
+typealias IOHIDEventSystemClientCreateFunc =
+@convention(c) (CFAllocator?) -> IOHIDEventSystemClient?
 
-// MARK: - Apple Silicon Temperature Sensor
+typealias IOHIDEventSystemClientSetMatchingFunc =
+@convention(c) (IOHIDEventSystemClient?, CFDictionary?) -> Void
+
+typealias IOHIDEventSystemClientCopyServicesFunc =
+@convention(c) (IOHIDEventSystemClient) -> Unmanaged<CFArray>?
+
+typealias IOHIDServiceClientCopyEventFunc =
+@convention(c) (IOHIDServiceClient, Int64, Int32, Int64) -> Unmanaged<CFTypeRef>?
+
+typealias IOHIDEventGetFloatValueFunc =
+@convention(c) (IOHIDEvent, UInt32) -> Double
+
+typealias IOHIDServiceClientCopyPropertyFunc =
+@convention(c) (IOHIDServiceClient, CFString) -> Unmanaged<CFTypeRef>?
+
+// Event-driven APIs
+typealias IOHIDEventSystemClientScheduleWithRunLoopFunc = @convention(c) (IOHIDEventSystemClient, CFRunLoop?, CFString?) -> Void
+typealias IOHIDEventSystemClientEventCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+typealias IOHIDEventSystemClientRegisterEventCallbackFunc = @convention(c) (IOHIDEventSystemClient, IOHIDEventSystemClientEventCallback?, UnsafeMutableRawPointer?) -> Void
+
+// MARK: - 数据模型
+
 struct AppleSiliconSensorReading {
     let name: String
     let temperature: Double
 }
 
+private struct SensorService {
+    let service: IOHIDServiceClient
+    let name: String
+}
+
 // MARK: - Apple Silicon Sensors Manager
-class AppleSiliconSensors {
-    static var shared: AppleSiliconSensors?
-    
-    // HID Constants
-    private let kIOHIDEventTypeTemperature: Int32 = 15
-    private let kHIDPage_AppleVendor: Int32 = 0xff00
-    private let kHIDUsage_AppleVendor_TemperatureSensor: Int32 = 0x0005
-    
-    // Dynamically loaded functions
-    private let eventSystemClientCreate: IOHIDEventSystemClientCreateFunc
-    private let eventSystemClientSetMatching: IOHIDEventSystemClientSetMatchingFunc
-    private let eventSystemClientCopyServices: IOHIDEventSystemClientCopyServicesFunc
-    private let serviceClientCopyEvent: IOHIDServiceClientCopyEventFunc
-    private let eventGetFloatValue: IOHIDEventGetFloatValueFunc
-    private let serviceClientCopyProperty: IOHIDServiceClientCopyPropertyFunc
-    
-    // Cached client and services to avoid memory leaks
-    private var systemClient: IOHIDEventSystemClient?
-    private var cachedServices: [IOHIDServiceClient] = []
-    private var dlopenHandle: UnsafeMutableRawPointer?
-    
-    private init?() {
-        // Load IOKit framework
-        guard let handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW) else {
-            print("AppleSiliconSensors: Failed to load IOKit framework")
-            return nil
-        }
-        self.dlopenHandle = handle
-        
-        // Load required functions
-        guard let create = dlsym(handle, "IOHIDEventSystemClientCreate"),
-              let setMatching = dlsym(handle, "IOHIDEventSystemClientSetMatching"),
-              let copyServices = dlsym(handle, "IOHIDEventSystemClientCopyServices"),
-              let copyEvent = dlsym(handle, "IOHIDServiceClientCopyEvent"),
-              let getFloat = dlsym(handle, "IOHIDEventGetFloatValue"),
-              let copyProperty = dlsym(handle, "IOHIDServiceClientCopyProperty") else {
-            print("AppleSiliconSensors: Failed to load required functions")
-            dlclose(handle)
-            return nil
-        }
-        
-        self.eventSystemClientCreate = unsafeBitCast(create, to: IOHIDEventSystemClientCreateFunc.self)
-        self.eventSystemClientSetMatching = unsafeBitCast(setMatching, to: IOHIDEventSystemClientSetMatchingFunc.self)
-        self.eventSystemClientCopyServices = unsafeBitCast(copyServices, to: IOHIDEventSystemClientCopyServicesFunc.self)
-        self.serviceClientCopyEvent = unsafeBitCast(copyEvent, to: IOHIDServiceClientCopyEventFunc.self)
-        self.eventGetFloatValue = unsafeBitCast(getFloat, to: IOHIDEventGetFloatValueFunc.self)
-        self.serviceClientCopyProperty = unsafeBitCast(copyProperty, to: IOHIDServiceClientCopyPropertyFunc.self)
-        
-        // Initialize client and cache services
-        initializeClient()
-    }
-    
-    private func initializeClient() {
-        let dict: NSMutableDictionary = [
-            "PrimaryUsagePage": kHIDPage_AppleVendor,
-            "PrimaryUsage": kHIDUsage_AppleVendor_TemperatureSensor
-        ]
-        
-        guard let client = eventSystemClientCreate(kCFAllocatorDefault) else {
-            print("AppleSiliconSensors: Failed to create event system client")
-            return
-        }
-        self.systemClient = client
-        eventSystemClientSetMatching(client, dict as CFDictionary)
-        
-        guard let services = eventSystemClientCopyServices(client) else {
-            print("AppleSiliconSensors: Failed to copy services")
-            return
-        }
-        
-        // Cache service clients
-        let count = CFArrayGetCount(services)
-        for i in 0..<count {
-            let servicePtr = CFArrayGetValueAtIndex(services, i)
-            let service = unsafeBitCast(servicePtr, to: IOHIDServiceClient.self)
-            cachedServices.append(service)
-        }
-        
-        print("AppleSiliconSensors: Cached \(cachedServices.count) sensor services")
-    }
-    
-    // Initialize shared instance
+
+final class AppleSiliconSensors {
+
+    // Keep shared optional so callers can use optional chaining without changing many call sites
+    // Use a failable factory so missing symbols or dlopen failures don't crash the app.
+    static let shared: AppleSiliconSensors? = AppleSiliconSensors.createIfAvailable()
+
+    // Allow explicit initialization from other modules
     static func initialize() {
-        shared = AppleSiliconSensors()
-        if let sensors = shared?.getAllTemperatures(), !sensors.isEmpty {
-            print("AppleSiliconSensors: Ready - found \(sensors.count) sensors")
-        } else {
-            print("AppleSiliconSensors: Warning - no sensors found")
-        }
+        _ = AppleSiliconSensors.shared
     }
-    
-    // MARK: - Public API
-    
-    /// Get all temperature sensor readings
-    func getAllTemperatures() -> [AppleSiliconSensorReading] {
-        var results: [AppleSiliconSensorReading] = []
-        
-        for service in cachedServices {
-            guard let event = serviceClientCopyEvent(service, Int64(kIOHIDEventTypeTemperature), 0, 0),
-                  let nameCF = serviceClientCopyProperty(service, "Product" as CFString),
-                  let name = nameCF as String? else {
-                continue
-            }
-            
-            let value = eventGetFloatValue(event, UInt32(kIOHIDEventTypeTemperature << 16))
-            
-            // Filter invalid values (temperature should be between 0 and 150°C)
-            if value > 0 && value < 150 {
-                results.append(AppleSiliconSensorReading(name: name, temperature: value))
-            }
-        }
-        
-        return results.sorted { $0.name < $1.name }
+
+    // Factory that attempts to create an instance and returns nil on any failure.
+    private static func createIfAvailable() -> AppleSiliconSensors? {
+        return AppleSiliconSensors()
     }
-    
-    /// Get CPU temperature (average of PMU tdie sensors)
-    var cpuTemperature: Double? {
-        let sensors = getAllTemperatures()
-        
-        // Apple Silicon uses PMU tdie sensors for CPU/GPU temperature
-        // PMU tdie1-14 are the main temperature sensors
-        let cpuSensors = sensors.filter { sensor in
-            sensor.name.hasPrefix("PMU tdie")
-        }
-        
-        if cpuSensors.isEmpty {
-            // Fallback: use PMU2 tdie sensors
-            let pmu2Sensors = sensors.filter { $0.name.hasPrefix("PMU2 tdie") }
-            if !pmu2Sensors.isEmpty {
-                let avg = pmu2Sensors.map { $0.temperature }.reduce(0, +) / Double(pmu2Sensors.count)
-                return avg
-            }
+
+    // HID 常量
+    private let temperatureEventType: Int32 = 15
+    private let vendorPage: Int32 = 0xff00
+    private let temperatureUsage: Int32 = 0x0005
+
+    // 动态加载函数 (optional so we can fail gracefully)
+    private let createClient: IOHIDEventSystemClientCreateFunc?
+    private let setMatching: IOHIDEventSystemClientSetMatchingFunc?
+    private let copyServices: IOHIDEventSystemClientCopyServicesFunc?
+    private let copyEvent: IOHIDServiceClientCopyEventFunc?
+    private let getFloat: IOHIDEventGetFloatValueFunc?
+    private let copyProperty: IOHIDServiceClientCopyPropertyFunc?
+    private let scheduleWithRunLoop: IOHIDEventSystemClientScheduleWithRunLoopFunc?
+    private let registerEventCallback: IOHIDEventSystemClientRegisterEventCallbackFunc?
+
+    private var client: IOHIDEventSystemClient?
+    private var sensors: [SensorService] = []
+    private var dlHandle: UnsafeMutableRawPointer?
+    // Cached latest readings and synchronization
+    private let readingsQueue = DispatchQueue(label: "com.eul.applesilicon.readings")
+    private var cachedReadings: [AppleSiliconSensorReading] = []
+    private var lastReadTimestamp: TimeInterval = 0
+    private let minReadInterval: TimeInterval = 1.0 // seconds
+    // Event-driven buffering and runloop thread
+    private var eventBuffer: [(service: IOHIDServiceClient, temperature: Double)] = []
+    private let eventBufferCapacity: Int = 256
+    private var runLoopThread: Thread?
+
+    // MARK: 初始化
+
+    // Failable initializer (returns nil on any dlopen/dlsym failure)
+    private init?() {
+
+        guard let handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW) else {
             return nil
         }
-        
-        let avgTemp = cpuSensors.map { $0.temperature }.reduce(0, +) / Double(cpuSensors.count)
-        return avgTemp
+        dlHandle = handle
+
+        func load<T>(_ name: String, _ type: T.Type) -> T? {
+            guard let sym = dlsym(handle, name) else {
+                return nil
+            }
+            return unsafeBitCast(sym, to: type)
+        }
+
+        // Attempt to load all required symbols. If any are missing, bail out safely.
+        guard let c = load("IOHIDEventSystemClientCreate", IOHIDEventSystemClientCreateFunc.self),
+              let s = load("IOHIDEventSystemClientSetMatching", IOHIDEventSystemClientSetMatchingFunc.self),
+              let cs = load("IOHIDEventSystemClientCopyServices", IOHIDEventSystemClientCopyServicesFunc.self),
+              let ce = load("IOHIDServiceClientCopyEvent", IOHIDServiceClientCopyEventFunc.self),
+              let gf = load("IOHIDEventGetFloatValue", IOHIDEventGetFloatValueFunc.self),
+              let cp = load("IOHIDServiceClientCopyProperty", IOHIDServiceClientCopyPropertyFunc.self)
+        else {
+            // Close handle if we couldn't load all symbols
+            if let h = dlHandle { dlclose(h) }
+            dlHandle = nil
+            return nil
+        }
+
+        // Assign loaded symbols
+        createClient = c
+        setMatching = s
+        copyServices = cs
+        copyEvent = ce
+        getFloat = gf
+        copyProperty = cp
+
+        // Optional event-driven symbols. If missing we'll continue using polling.
+        scheduleWithRunLoop = load("IOHIDEventSystemClientScheduleWithRunLoop", IOHIDEventSystemClientScheduleWithRunLoopFunc.self)
+        registerEventCallback = load("IOHIDEventSystemClientRegisterEventCallback", IOHIDEventSystemClientRegisterEventCallbackFunc.self)
+
+        initializeSensors()
+        // If event APIs are available, we intentionally do NOT register the callback
+        // automatically here because the callback ABI for private IOHID APIs can vary
+        // between OS versions and may cause crashes if the signature does not match.
+        // Keep the function pointers available so callers or future changes can opt-in
+        // to event-driven mode safely. For now we continue using the polling fallback.
+        // Successful init
     }
-    
-    /// Get GPU temperature (same as CPU on Apple Silicon, shared die)
+
+    // MARK: 初始化传感器
+
+    private func initializeSensors() {
+
+        guard let createClient = createClient,
+              let setMatching = setMatching,
+              let copyServices = copyServices else { return }
+
+        guard let client = createClient(kCFAllocatorDefault) else { return }
+        self.client = client
+
+        let match: NSDictionary = [
+            "PrimaryUsagePage": vendorPage,
+            "PrimaryUsage": temperatureUsage
+        ]
+        setMatching(client, match)
+
+        guard let servicesUn = copyServices(client) else { return }
+        let services = servicesUn.takeRetainedValue()
+        let count = CFArrayGetCount(services)
+
+        for i in 0..<count {
+            guard let ptr = CFArrayGetValueAtIndex(services, i) else { continue }
+            let service = UnsafeMutableRawPointer(mutating: ptr)
+
+            // 获取传感器名字
+            guard let copyProperty = copyProperty,
+                  let nameUn = copyProperty(service, "Product" as CFString) else { continue }
+
+            // takeRetainedValue to claim ownership and bridge to CFTypeRef
+            let nameCF = nameUn.takeRetainedValue()
+
+            // CFTypeRef -> CFString -> String 桥接
+            let name: String
+            if CFGetTypeID(nameCF) == CFStringGetTypeID(), let str = nameCF as? String {
+                name = str
+            } else {
+                name = "Unknown"
+            }
+            sensors.append(SensorService(service: service, name: name))
+        }
+
+        // services is a CFArray returned by copyServices; ownership transferred via takeRetainedValue
+        print("AppleSiliconSensors: detected \(sensors.count) sensors")
+    }
+
+    // MARK: 读取所有温度
+
+    func readAll() -> [AppleSiliconSensorReading] {
+        // Throttle reads to at most once per minReadInterval to avoid frequent allocations
+        let now = Date().timeIntervalSince1970
+        var snapshot: [AppleSiliconSensorReading] = []
+
+        readingsQueue.sync {
+            if now - lastReadTimestamp < minReadInterval {
+                snapshot = cachedReadings
+                return
+            }
+        }
+
+        var results: [AppleSiliconSensorReading] = []
+
+        for sensor in sensors {
+            autoreleasepool {
+                // Ensure copyEvent function pointer exists before calling
+                guard let copyEvent = copyEvent else { return }
+                guard let eventUn = copyEvent(sensor.service,
+                                              Int64(temperatureEventType),
+                                              0,
+                                              0) else { return }
+
+                // copyEvent follows 'Copy' semantics -> takeRetainedValue to claim ownership
+                let eventCF = eventUn.takeRetainedValue()
+                // Bridge CFTypeRef -> opaque pointer without changing ownership
+                let eventPtr = Unmanaged.passUnretained(eventCF as AnyObject).toOpaque()
+
+                guard let getFloat = getFloat else { return }
+                let value = getFloat(eventPtr, UInt32(temperatureEventType << 16))
+                // eventCF is now managed by ARC after takeRetainedValue()
+                if value > 0 && value < 150 {
+                    results.append(AppleSiliconSensorReading(name: sensor.name, temperature: value))
+                }
+            }
+        }
+
+        readingsQueue.sync {
+            cachedReadings = results
+            lastReadTimestamp = now
+            snapshot = cachedReadings
+        }
+
+        return snapshot
+    }
+
+    // Backwards-compatible API used by existing call sites
+    // Kept as instance method to match usage: AppleSiliconSensors.shared?.getAllTemperatures()
+    func getAllTemperatures() -> [AppleSiliconSensorReading] {
+        return readAll()
+    }
+
+    // MARK: CPU 平均温度
+
+    // CPU average temperature (computed property for compatibility with callers)
+    var cpuTemperature: Double? {
+        let temps = readAll()
+        let cpuSensors = temps.filter { $0.name.hasPrefix("PMU tdie") || $0.name.lowercased().contains("cpu") }
+        guard !cpuSensors.isEmpty else { return nil }
+        return cpuSensors.map { $0.temperature }.reduce(0, +) / Double(cpuSensors.count)
+    }
+
+    // GPU temperature if available
     var gpuTemperature: Double? {
-        return cpuTemperature
+        let temps = readAll()
+        let gpuSensors = temps.filter { $0.name.lowercased().contains("gpu") || $0.name.hasPrefix("GPU") }
+        guard !gpuSensors.isEmpty else { return nil }
+        return gpuSensors.map { $0.temperature }.reduce(0, +) / Double(gpuSensors.count)
     }
-    
-    /// Get SOC (System on Chip) temperature - same as CPU on Apple Silicon
+
+    // SOC temperature approximation
     var socTemperature: Double? {
-        return cpuTemperature
+        let temps = readAll()
+        let socSensors = temps.filter { $0.name.lowercased().contains("soc") || $0.name.lowercased().contains("tdie") || $0.name.lowercased().contains("die") }
+        guard !socSensors.isEmpty else { return nil }
+        return socSensors.map { $0.temperature }.reduce(0, +) / Double(socSensors.count)
     }
-    
-    /// Check if running on Apple Silicon
-    static var isAppleSilicon: Bool {
-        #if arch(arm64)
-        return true
-        #else
-        return false
-        #endif
-    }
-    
+
     deinit {
-        // Clean up dlopen handle
-        if let handle = dlopenHandle {
+        if let handle = dlHandle {
             dlclose(handle)
         }
+    }
+
+    // MARK: - Event callback and runloop
+
+    // The event callback is a C-convention closure matching IOHIDEventSystemClientEventCallback.
+    // It uses the provided context pointer to recover the `AppleSiliconSensors` instance
+    // and then extracts the temperature value using the instance's `getFloat` function
+    // pointer (if available). We keep the callback minimal: validate the value and
+    // push it into a bounded in-memory buffer under `readingsQueue` synchronization.
+    private static let eventCallback: IOHIDEventSystemClientEventCallback = { (clientRaw, serviceRaw, eventRaw, contextRaw) in
+        guard let ctx = contextRaw else { return }
+        let myself = Unmanaged<AppleSiliconSensors>.fromOpaque(ctx).takeUnretainedValue()
+
+        // Extract service and event pointers
+        guard let servicePtr = serviceRaw else { return }
+        let service = servicePtr
+        guard let eventPtrRaw = eventRaw else { return }
+        let event = eventPtrRaw
+
+        guard let getFloat = myself.getFloat else { return }
+        let value = getFloat(event, UInt32(myself.temperatureEventType << 16))
+
+        // Basic validation
+        guard value > 0 && value < 150 else { return }
+
+        // Update buffer and cached readings under synchronization
+        myself.readingsQueue.sync {
+            // Maintain bounded event buffer
+            myself.eventBuffer.append((service: service, temperature: value))
+            if myself.eventBuffer.count > myself.eventBufferCapacity {
+                myself.eventBuffer.removeFirst(myself.eventBuffer.count - myself.eventBufferCapacity)
+            }
+
+            // Update cachedReadings by mapping service -> sensor name if known
+            if let idx = myself.sensors.firstIndex(where: { $0.service == service }) {
+                let name = myself.sensors[idx].name
+                // Replace existing reading for the sensor or append
+                if let existing = myself.cachedReadings.firstIndex(where: { $0.name == name }) {
+                    myself.cachedReadings[existing] = AppleSiliconSensorReading(name: name, temperature: value)
+                } else {
+                    myself.cachedReadings.append(AppleSiliconSensorReading(name: name, temperature: value))
+                }
+                myself.lastReadTimestamp = Date().timeIntervalSince1970
+            }
+        }
+    }
+
+    // Start a dedicated thread and schedule the IOHID client on its runloop.
+    // This keeps event callbacks off the main thread and provides a stable runloop
+    // for IOHID to deliver events. The method is intentionally small and
+    // non-blocking (it starts a Thread which calls CFRunLoopRun()).
+    private func startEventRunLoopThread() {
+        // Start a dedicated thread with a runloop and schedule the IOHID client on it
+        guard let schedule = scheduleWithRunLoop, let client = client else { return }
+
+        let thread = Thread {
+            schedule(client, CFRunLoopGetCurrent(), nil)
+            CFRunLoopRun()
+        }
+        thread.name = "com.eul.applesilicon.hid"
+        thread.start()
+        runLoopThread = thread
     }
 }
