@@ -27,8 +27,10 @@ struct LineChart: View {
         CGFloat((value - minimumPoint) / (maximumPoint - minimumPoint)) * frame.height
     }
 
-    // https://stackoverflow.com/a/63556358/12514940
-    func path() -> Path {
+    @State private var cachedPath: Path?
+    @State private var cachedPoints: [Double]?
+
+    private func computePath() -> Path {
         guard points.count > 1 else {
             return Path()
         }
@@ -46,14 +48,22 @@ struct LineChart: View {
         ).map { CGPoint(x: $0, y: max(LineChart.minimumLineHeight, sequence.sample(atTime: $0) as? CGFloat ?? 0)) }
 
         var path = Path()
-
         path.move(to: CGPoint(x: splinedValues[0].x, y: splinedValues[0].y))
-
         splinedValues.dropFirst().forEach {
             path.addLine(to: $0)
         }
 
         return path
+    }
+
+    func path() -> Path {
+        if cachedPoints == points, let cached = cachedPath {
+            return cached
+        }
+        let newPath = computePath()
+        cachedPoints = points
+        cachedPath = newPath
+        return newPath
     }
 
     func closedPath() -> Path {
@@ -62,7 +72,6 @@ struct LineChart: View {
         }
 
         var path = self.path()
-
         path.addLine(to: CGPoint(x: stepX * CGFloat(points.count - 1), y: 0))
         path.addLine(to: CGPoint.zero)
         path.closeSubpath()
