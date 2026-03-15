@@ -15,16 +15,33 @@ struct DiskRowView: View {
 
     var disk: DiskList.Disk
 
+    var usagePercentage: Double {
+        guard disk.size > 0 else { return 0 }
+        return Double(disk.size - disk.freeSize) / Double(disk.size) * 100
+    }
+
     func refresh() {
         isEjecting = false
         diskStore.refresh()
     }
 
+    private func usageColor(_ usage: Double) -> Color {
+        if usage > 90 {
+            return .red
+        } else if usage > 70 {
+            return .orange
+        } else {
+            return .green
+        }
+    }
+
     var body: some View {
         HStack {
             Text(disk.name)
-                .secondaryDisplayText()
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 50, alignment: .leading)
                 .lineLimit(1)
+
             if disk.isEjectable {
                 if isEjecting {
                     ActivityIndicatorView {
@@ -59,18 +76,37 @@ struct DiskRowView: View {
                     }
                 }
             }
-            Spacer()
-            ProgressBarView(
-                width: 130,
-                percentage: CGFloat(Double(disk.size - disk.freeSize) / Double(disk.size) * 100),
-                showText: false
-            )
+
+            // Usage bar (CPU core style)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.secondary.opacity(0.2))
+                        .frame(height: 8)
+
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(usageColor(usagePercentage))
+                        .frame(width: geometry.size.width * CGFloat(usagePercentage / 100), height: 8)
+                }
+            }
+            .frame(height: 8)
+            .frame(maxWidth: 100)
+
+            Text(String(format: "%.0f%%", usagePercentage))
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 40, alignment: .trailing)
+
+            // Temperature
             if let temp = disk.temperature {
                 Text(SmcControl.shared.formatTemp(temp))
-                    .displayText()
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .trailing)
             } else {
                 Text("N/A")
-                    .secondaryDisplayText()
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .trailing)
             }
         }
     }

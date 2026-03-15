@@ -91,6 +91,27 @@ class DiskStore: ObservableObject, Refreshable {
             if let first = storageSensors.first {
                 return first.temperature
             }
+            // Fallback: use SOC temperature as approximation
+            if let socTemp = sensors.socTemperature {
+                return socTemp
+            }
+        }
+        #endif
+        // Fallback: Apple Silicon uses integrated storage
+        // Try to get storage-related temperature from AppleSiliconSensors
+        #if arch(arm64)
+        if let sensors = AppleSiliconSensors.shared {
+            let temps = sensors.readAll()
+            // Look for storage/disk/NVMe related sensors
+            let storageSensors = temps.filter { 
+                $0.name.lowercased().contains("storage") ||
+                $0.name.lowercased().contains("disk") ||
+                $0.name.lowercased().contains("nvme") ||
+                $0.name.lowercased().contains("ssd")
+            }
+            if let first = storageSensors.first {
+                return first.temperature
+            }
         }
         #endif
         
