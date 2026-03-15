@@ -31,22 +31,25 @@ struct DiskRowView: View {
     }
 
     private func ejectDisk() {
-        isEjecting = true
-        DispatchQueue.global().async {
-            do {
-                try NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: disk.path, isDirectory: true))
-            } catch {
-                DispatchQueue.main.async {
-                    let alert = NSAlert()
-                    alert.messageText = error.localizedDescription
-                    alert.alertStyle = .informational
-                    NSApp.activate(ignoringOtherApps: true)
-                    alert.runModal()
+        // Defer state change to avoid modifying state during view update
+        DispatchQueue.main.async {
+            self.isEjecting = true
+            DispatchQueue.global().async {
+                do {
+                    try NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: self.disk.path, isDirectory: true))
+                } catch {
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = error.localizedDescription
+                        alert.alertStyle = .informational
+                        NSApp.activate(ignoringOtherApps: true)
+                        alert.runModal()
+                    }
                 }
-            }
-            DispatchQueue.main.async {
-                self.isEjecting = false
-                self.diskStore.refresh()
+                DispatchQueue.main.async {
+                    self.isEjecting = false
+                    self.diskStore.refresh()
+                }
             }
         }
     }
