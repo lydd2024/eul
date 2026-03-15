@@ -11,18 +11,13 @@ import SwiftUI
 
 struct DiskRowView: View {
     @EnvironmentObject var diskStore: DiskStore
-    @State var isEjecting = false
+    @State private var isEjecting = false
 
     var disk: DiskList.Disk
 
     var usagePercentage: Double {
         guard disk.size > 0 else { return 0 }
         return Double(disk.size - disk.freeSize) / Double(disk.size) * 100
-    }
-
-    func refresh() {
-        isEjecting = false
-        diskStore.refresh()
     }
 
     private func usageColor(_ usage: Double) -> Color {
@@ -32,6 +27,27 @@ struct DiskRowView: View {
             return .orange
         } else {
             return .green
+        }
+    }
+
+    private func ejectDisk() {
+        isEjecting = true
+        DispatchQueue.global().async {
+            do {
+                try NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: disk.path, isDirectory: true))
+            } catch {
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = error.localizedDescription
+                    alert.alertStyle = .informational
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                }
+            }
+            DispatchQueue.main.async {
+                self.isEjecting = false
+                self.diskStore.refresh()
+            }
         }
     }
 
@@ -55,24 +71,7 @@ struct DiskRowView: View {
                         imageName: "Eject",
                         toolTip: "disk.eject"
                     ) {
-                        isEjecting = true
-                        DispatchQueue.global().async {
-                            do {
-                                try NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: disk.path, isDirectory: true))
-                            } catch {
-                                DispatchQueue.main.async {
-                                    let alert = NSAlert()
-                                    alert.messageText = error.localizedDescription
-                                    alert.alertStyle = .informational
-
-                                    NSApp.activate(ignoringOtherApps: true)
-                                    alert.runModal()
-                                }
-                            }
-                            DispatchQueue.main.async {
-                                refresh()
-                            }
-                        }
+                        ejectDisk()
                     }
                 }
             }
