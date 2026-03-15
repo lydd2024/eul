@@ -74,7 +74,14 @@ class DiskStore: ObservableObject, Refreshable {
         var iterator: io_iterator_t = 0
         let matchDict = IOServiceMatching("IONVMeController")
         guard let matching = matchDict else { return nil }
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == kIOReturnSuccess else {
+
+        // Use compatible port for macOS 10.15+
+        var mainPort: mach_port_t = 0
+        if #available(macOS 12.0, *) {
+            mainPort = kIOMainPortDefault
+        }
+
+        guard IOServiceGetMatchingServices(mainPort, matching, &iterator) == kIOReturnSuccess else {
             return nil
         }
         defer { IOObjectRelease(iterator) }
