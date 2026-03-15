@@ -6,7 +6,6 @@
 //  Copyright © 2020 Gao Sun. All rights reserved.
 //
 
-import SpriteKit
 import SwiftUI
 
 struct LineChart: View {
@@ -30,27 +29,61 @@ struct LineChart: View {
     @State private var cachedPath: Path?
     @State private var cachedPoints: [Double]?
 
+    // Catmull-Rom spline implementation (pure Swift) to avoid SpriteKit allocations.
+    // Produces interpolated points between consecutive samples with a configurable
+    // pixel step to control density and allocations.
     private func computePath() -> Path {
-        guard points.count > 1 else {
-            return Path()
-        }
+        guard points.count > 1 else { return Path() }
 
-        let xPoints = (0..<points.count).map { stepX * CGFloat($0) }
+        let n = points.count
         let yPoints = points.map { getY($0) }
-        let sequence = SKKeyframeSequence(keyframeValues: yPoints, times: xPoints.map { NSNumber(floatLiteral: Double($0)) })
-        sequence.interpolationMode = .spline
+        let maxX = stepX * CGFloat(n - 1)
 
-        let maxX = stepX * CGFloat(points.count - 1)
-        let splinedValues = stride(
-            from: 0,
-            through: maxX,
-            by: 0.5
-        ).map { CGPoint(x: $0, y: max(LineChart.minimumLineHeight, sequence.sample(atTime: $0) as? CGFloat ?? 0)) }
+        // Sampling resolution in pixels (increase to reduce allocations)
+        let sampleStep: CGFloat = 1.0
 
         var path = Path()
-        path.move(to: CGPoint(x: splinedValues[0].x, y: splinedValues[0].y))
-        splinedValues.dropFirst().forEach {
-            path.addLine(to: $0)
+        var didMove = false
+
+        func catmullRom(_ p0: CGFloat, _ p1: CGFloat, _ p2: CGFloat, _ p3: CGFloat, _ t: CGFloat) -> CGFloat {
+            // 0.5 tension for centripetal Catmull-Rom (standard)
+            let t2 = t * t
+            let t3 = t2 * t
+            return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+        }
+
+        for i in 0..<(n - 1) {
+            let x1 = stepX * CGFloat(i)
+            let x2 = stepX * CGFloat(i + 1)
+            let segLen = x2 - x1
+
+            // control points for Catmull-Rom
+            let p0 = i - 1 >= 0 ? yPoints[i - 1] : yPoints[i]
+            let p1 = yPoints[i]
+            let p2 = yPoints[i + 1]
+            let p3 = i + 2 < n ? yPoints[i + 2] : yPoints[i + 1]
+
+            let samples = max(1, Int(ceil(segLen / sampleStep)))
+            for s in 0..<samples {
+                let t = CGFloat(s) / CGFloat(samples)
+                let y = max(LineChart.minimumLineHeight, catmullRom(p0, p1, p2, p3, t))
+                let x = x1 + t * segLen
+                let pt = CGPoint(x: x, y: y)
+                if !didMove {
+                    path.move(to: pt)
+                    didMove = true
+                } else {
+                    path.addLine(to: pt)
+                }
+            }
+        }
+
+        // Ensure last point is appended
+        let last = CGPoint(x: maxX, y: max(LineChart.minimumLineHeight, yPoints.last ?? 0))
+        if !didMove {
+            path.move(to: last)
+        } else {
+            path.addLine(to: last)
         }
 
         return path
