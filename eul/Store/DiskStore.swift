@@ -66,11 +66,40 @@ class DiskStore: ObservableObject, Refreshable {
         return ByteUnit(ceiling, kilo: 1000).readable
     }
 
-    // MARK: - NVMe Temperature Query
+    // MARK: - Disk Temperature Query
 
-    /// Get NVMe disk temperature using IOKit
+    /// Get disk temperature using IOKit
     /// - Returns: Temperature in Celsius, or nil if unavailable
-    func getNVMeTemperature() -> Double? {
+    func getDiskTemperature() -> Double? {
+        // Try NVMe controller first (Intel Macs with NVMe SSDs)
+        if let temp = getNVMeTemperature() {
+            return temp
+        }
+        
+        // Fallback: Apple Silicon uses integrated storage
+        // Try to get storage-related temperature from AppleSiliconSensors
+        #if arch(arm64)
+        if let sensors = AppleSiliconSensors.shared {
+            let temps = sensors.readAll()
+            // Look for storage/disk/NVMe related sensors
+            let storageSensors = temps.filter { 
+                $0.name.lowercased().contains("storage") ||
+                $0.name.lowercased().contains("disk") ||
+                $0.name.lowercased().contains("nvme") ||
+                $0.name.lowercased().contains("ssd")
+            }
+            if let first = storageSensors.first {
+                return first.temperature
+            }
+        }
+        #endif
+        
+        return nil
+    }
+    
+    /// Get NVMe disk temperature using IOKit (for Intel Macs)
+    /// - Returns: Temperature in Celsius, or nil if unavailable
+    private func getNVMeTemperature() -> Double? {
         var iterator: io_iterator_t = 0
         let matchDict = IOServiceMatching("IONVMeController")
         guard let matching = matchDict else { return nil }
@@ -132,8 +161,8 @@ class DiskStore: ObservableObject, Refreshable {
             return
         }
 
-        // Get NVMe temperature once per refresh
-        let nvmeTemperature = getNVMeTemperature()
+        // Get disk temperature once per refresh
+        let diskTemperature = getDiskTemperature()
 
         guard let volumes = (try? FileManager.default.contentsOfDirectory(atPath: DiskList.volumesPath)) else {
             list = nil
@@ -161,7 +190,7 @@ class DiskStore: ObservableObject, Refreshable {
                 size: size,
                 freeSize: freeSize,
                 isEjectable: isEjectable,
-                temperature: nvmeTemperature
+                temperature: diskTemperature
             )
         })
     }

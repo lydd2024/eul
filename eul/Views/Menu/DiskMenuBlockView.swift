@@ -62,7 +62,7 @@ struct DiskRowView: View {
             Spacer()
             ProgressBarView(
                 width: 130,
-                percentage: CGFloat(Double(disk.size - disk.freeSize) / Double(disk.size)),
+                percentage: CGFloat(Double(disk.size - disk.freeSize) / Double(disk.size) * 100),
                 showText: false
             )
             if let temp = disk.temperature {
