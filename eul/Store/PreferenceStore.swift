@@ -54,7 +54,7 @@ class PreferenceStore: ObservableObject {
 
     @Published var textDisplay = Preference.TextDisplay.compact
     @Published var fontDesign: Preference.FontDesign = .default
-    @Published var smcRefreshRate = 3
+    @Published var smcRefreshRate = 5
     @Published var networkRefreshRate = 3
     @Published var showIcon = true
     @Published var showCPUTopActivities = true
