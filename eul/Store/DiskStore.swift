@@ -91,17 +91,30 @@ class DiskStore: ObservableObject, Refreshable {
             var properties: Unmanaged<CFMutableDictionary>?
             if IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == kIOReturnSuccess,
                let props = properties?.takeRetainedValue() as? [String: Any] {
-                // Try to get temperature from properties
-                // NVMe SMART data often contains temperature in "Temperature" key
-                if let temp = props["Temperature"] as? Double, temp > 0 && temp < 150 {
+                // NVMe temperature is stored in Kelvin (273.15 = 0°C)
+                // Typical range: 273-373K (0-100°C)
+                
+                // Try Double
+                if let temp = props["Temperature"] as? Double, temp > 200 && temp < 400 {
                     IOObjectRelease(service)
-                    return temp
+                    return temp - 273.15
                 }
-                // Check for nested properties
-                if let smartData = props["SMARTData"] as? [String: Any],
-                   let temp = smartData["Temperature"] as? Double, temp > 0 && temp < 150 {
+                // Try Int (common in NVMe SMART)
+                if let temp = props["Temperature"] as? Int, temp > 200 && temp < 400 {
                     IOObjectRelease(service)
-                    return temp
+                    return Double(temp) - 273.15
+                }
+                
+                // Check nested SMARTData
+                if let smartData = props["SMARTData"] as? [String: Any],
+                   let temp = smartData["Temperature"] as? Double, temp > 200 && temp < 400 {
+                    IOObjectRelease(service)
+                    return temp - 273.15
+                }
+                if let smartData = props["SMARTData"] as? [String: Any],
+                   let temp = smartData["Temperature"] as? Int, temp > 200 && temp < 400 {
+                    IOObjectRelease(service)
+                    return Double(temp) - 273.15
                 }
             }
             IOObjectRelease(service)
