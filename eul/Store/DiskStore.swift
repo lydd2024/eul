@@ -8,6 +8,7 @@
 
 import Combine
 import Foundation
+import IOKit
 import SharedLibrary
 import SwiftUI
 
@@ -65,6 +66,44 @@ class DiskStore: ObservableObject, Refreshable {
         return ByteUnit(ceiling, kilo: 1000).readable
     }
 
+    // MARK: - NVMe Temperature Query
+
+    /// Get NVMe disk temperature using IOKit
+    /// - Returns: Temperature in Celsius, or nil if unavailable
+    func getNVMeTemperature() -> Double? {
+        var iterator: io_iterator_t = 0
+        let matchDict = IOServiceMatching("IONVMeController")
+        guard let matching = matchDict else { return nil }
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == kIOReturnSuccess else {
+            return nil
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var service = IOIteratorNext(iterator)
+        while service != 0 {
+            var properties: Unmanaged<CFMutableDictionary>?
+            if IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+               let props = properties?.takeRetainedValue() as? [String: Any] {
+                // Try to get temperature from properties
+                // NVMe SMART data often contains temperature in "Temperature" key
+                if let temp = props["Temperature"] as? Double, temp > 0 && temp < 150 {
+                    IOObjectRelease(service)
+                    return temp
+                }
+                // Check for nested properties
+                if let smartData = props["SMARTData"] as? [String: Any],
+                   let temp = smartData["Temperature"] as? Double, temp > 0 && temp < 150 {
+                    IOObjectRelease(service)
+                    return temp
+                }
+            }
+            IOObjectRelease(service)
+            service = IOIteratorNext(iterator)
+        }
+
+        return nil
+    }
+
     @objc func refresh() {
         guard
             componentsStore.activeComponents.contains(.Disk)
@@ -72,6 +111,9 @@ class DiskStore: ObservableObject, Refreshable {
         else {
             return
         }
+
+        // Get NVMe temperature once per refresh
+        let nvmeTemperature = getNVMeTemperature()
 
         guard let volumes = (try? FileManager.default.contentsOfDirectory(atPath: DiskList.volumesPath)) else {
             list = nil
@@ -98,7 +140,8 @@ class DiskStore: ObservableObject, Refreshable {
                 name: $0,
                 size: size,
                 freeSize: freeSize,
-                isEjectable: isEjectable
+                isEjectable: isEjectable,
+                temperature: nvmeTemperature
             )
         })
     }

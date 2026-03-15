@@ -20,6 +20,7 @@ struct DiskList {
         let size: UInt64
         let freeSize: UInt64
         let isEjectable: Bool
+        let temperature: Double?
 
         var id: String {
             name

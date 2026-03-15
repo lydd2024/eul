@@ -60,8 +60,18 @@ struct DiskRowView: View {
                 }
             }
             Spacer()
-            MenuInfoView(label: "U", text: disk.usedSizeString)
-            MenuInfoView(label: "F", text: disk.freeSizeString)
+            ProgressBarView(
+                width: 130,
+                percentage: CGFloat(Double(disk.size - disk.freeSize) / Double(disk.size)),
+                showText: false
+            )
+            if let temp = disk.temperature {
+                Text(SmcControl.shared.formatTemp(temp))
+                    .displayText()
+            } else {
+                Text("N/A")
+                    .secondaryDisplayText()
+            }
         }
     }
 }
