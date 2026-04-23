@@ -204,8 +204,10 @@ extension Preference {
             }
             .padding(.vertical, 8)
             .onPreferenceChange(FramePreferenceKey.self, perform: { value in
-                for data in value {
-                    self.frames[data.index] = data.frame
+                DispatchQueue.main.async {
+                    for data in value {
+                        self.frames[data.index] = data.frame
+                    }
                 }
             })
         }

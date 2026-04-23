@@ -58,12 +58,16 @@ class StatusBarItem: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        SharedStore.ui.menuWidth = menu.size.width
-        SharedStore.ui.menuOpened = true
+        DispatchQueue.main.async {
+            SharedStore.ui.menuWidth = menu.size.width
+            SharedStore.ui.menuOpened = true
+        }
     }
 
     func menuDidClose(_: NSMenu) {
-        SharedStore.ui.menuOpened = false
+        DispatchQueue.main.async {
+            SharedStore.ui.menuOpened = false
+        }
     }
 
     func checkVisibilityIfNeeded() {
@@ -137,7 +141,9 @@ class StatusBarItem: NSObject, NSMenuDelegate {
             guard statusBarSizeChanged <= 1 else {
                 return
             }
-            componentsStore.showComponents = componentsStore.showComponents
+            DispatchQueue.main.async {
+                self.componentsStore.objectWillChange.send()
+            }
         }
     }
 

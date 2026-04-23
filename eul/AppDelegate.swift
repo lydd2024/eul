@@ -119,7 +119,9 @@ extension AppDelegate {
             return
         }
 
-        NotificationCenter.default.post(name: .SMCShouldRefresh, object: nil)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .SMCShouldRefresh, object: nil)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(preferenceStore.smcRefreshRate)) { [self] in
             refreshSMCRepeatedly()
         }
@@ -130,7 +132,9 @@ extension AppDelegate {
             return
         }
 
-        NotificationCenter.default.post(name: .NetworkShouldRefresh, object: nil)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .NetworkShouldRefresh, object: nil)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(preferenceStore.networkRefreshRate)) { [self] in
             refreshNetworkRepeatedly()
         }

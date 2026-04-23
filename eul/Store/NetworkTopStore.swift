@@ -185,8 +185,10 @@ class NetworkTopStore: ObservableObject {
             .map {
                 $0 && $1.contains(.Network) && $2
             }
-            .sink { [self] in
-                update(shouldStart: $0)
+            .sink { [self] shouldStart in
+                DispatchQueue.main.async {
+                    update(shouldStart: shouldStart)
+                }
             }
     }
 }

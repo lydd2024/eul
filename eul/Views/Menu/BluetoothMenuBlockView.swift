@@ -59,7 +59,9 @@ struct BluetoothMenuBlockView: View {
         .padding(.top, 2)
         .menuBlock()
         .onAppear {
-            bluetoothStore.fetch()
+            DispatchQueue.main.async {
+                bluetoothStore.fetch()
+            }
         }
     }
 }

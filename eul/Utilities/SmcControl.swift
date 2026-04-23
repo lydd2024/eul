@@ -124,7 +124,9 @@ class SmcControl: Refreshable {
             )
         }
         #endif
-        NotificationCenter.default.post(name: .StoreShouldRefresh, object: nil)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .StoreShouldRefresh, object: nil)
+        }
     }
 }
 

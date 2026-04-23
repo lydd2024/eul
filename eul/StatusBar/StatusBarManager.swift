@@ -35,20 +35,30 @@ class StatusBarManager {
 
     func subscribe() {
         // TO-DO: refactor
-        activeCancellable = SharedStore.components.$activeComponents.sink {
-            self.render(components: $0)
+        activeCancellable = SharedStore.components.$activeComponents.sink { [self] components in
+            DispatchQueue.main.async {
+                self.render(components: components)
+            }
         }
         displayCancellable = preferenceStore.$textDisplay.sink { _ in
-            self.refresh()
+            DispatchQueue.main.async {
+                self.refresh()
+            }
         }
         showComponentsCancellable = SharedStore.components.$showComponents.sink { _ in
-            self.refresh()
+            DispatchQueue.main.async {
+                self.refresh()
+            }
         }
         showIconCancellable = preferenceStore.$showIcon.sink { _ in
-            self.refresh()
+            DispatchQueue.main.async {
+                self.refresh()
+            }
         }
         fontDesignCancellable = preferenceStore.$fontDesign.sink { _ in
-            self.refresh()
+            DispatchQueue.main.async {
+                self.refresh()
+            }
         }
         // Disable in Catalina to avoid protential crash
         if #available(OSX 11, *) {
@@ -67,10 +77,12 @@ class StatusBarManager {
     }
 
     func render(components _: [EulComponent]) {
-        item.isVisible = false
-
+        // Defer state change to avoid modifying state during view update
         DispatchQueue.main.async {
-            self.item.isVisible = true
+            self.item.isVisible = false
+            DispatchQueue.main.async {
+                self.item.isVisible = true
+            }
         }
     }
 }

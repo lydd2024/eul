@@ -158,8 +158,10 @@ struct HorizontalOrganizingView<Element: JSONCodabble & Equatable & Hashable, El
             }
         }
         .onPreferenceChange(FramePreferenceKey.self, perform: { value in
-            for data in value {
-                self.frames[data.index] = data.frame
+            DispatchQueue.main.async {
+                for data in value {
+                    self.frames[data.index] = data.frame
+                }
             }
         })
     }

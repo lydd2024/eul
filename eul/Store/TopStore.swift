@@ -171,8 +171,10 @@ class TopStore: ObservableObject {
             .map {
                 $0 && $1.contains(.CPU) && $2
             }
-            .sink { [self] in
-                updateCPU(shouldStart: $0)
+            .sink { [self] shouldStart in
+                DispatchQueue.main.async {
+                    updateCPU(shouldStart: shouldStart)
+                }
             }
 
         ramActiveCancellable = Publishers
@@ -184,8 +186,10 @@ class TopStore: ObservableObject {
             .map {
                 $0 && $1.contains(.Memory) && $2
             }
-            .sink { [self] in
-                updateRAM(shouldStart: $0)
+            .sink { [self] shouldStart in
+                DispatchQueue.main.async {
+                    updateRAM(shouldStart: shouldStart)
+                }
             }
     }
 }

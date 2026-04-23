@@ -17,7 +17,6 @@ public struct ProgressBarView: View {
         self.customText = customText
     }
 
-    @State var firstAppear = true
     public var width: CGFloat = 80
     public var percentage: CGFloat = 100
     public var showText = true
@@ -39,9 +38,6 @@ public struct ProgressBarView: View {
                     .displayText()
                     .frame(width: textWidth, alignment: .trailing)
             }
-        }
-        .onAppear {
-            self.firstAppear = false
         }
     }
 }

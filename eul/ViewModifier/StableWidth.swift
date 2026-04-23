@@ -58,7 +58,11 @@ struct StableWidth: ViewModifier {
         .frame(idealWidth: computedIdealWidth)
         .fixedSize()
         .onPreferenceChange(CGFloatPreferenceKey.self, perform: { value in
-            idealWidth = value.first
+            if let newWidth = value.first, newWidth != idealWidth {
+                DispatchQueue.main.async {
+                    idealWidth = newWidth
+                }
+            }
         })
     }
 }
